@@ -47,17 +47,17 @@ void RayTracer::Trace(int max_reflections) {
   cam_up_ = (world_bl - world_tl).Unit();
   std::size_t w = camera_.width();
   std::size_t h = camera_.height();
-  for (std::size_t col{}; col < w; ++col) {
-    // normalized column coordinate
-    float u = static_cast<float>(col) / static_cast<float>(w - 1);
-    for (std::size_t row{}; row < h; ++row) {
-      float v = static_cast<float>(row) / static_cast<float>(h - 1);
+  // row-major order keeps writes to the image buffer sequential
+  for (std::size_t row{}; row < h; ++row) {
+    float v = static_cast<float>(row) / static_cast<float>(h - 1);
+    for (std::size_t col{}; col < w; ++col) {
+      // normalized column coordinate
+      float u = static_cast<float>(col) / static_cast<float>(w - 1);
       // bilinear point on the (possibly rotated) image plane
       Vec3f point_world = world_tl + span_h * u + span_v * v;
       Ray ray(camera_.center(), point_world);
-      auto result = TraceRay(ray, max_reflections);
       // Always write the color; TraceRay fills background on miss
-      image_.at(row, col) = result.color;
+      image_.at(row, col) = TraceRay(ray, max_reflections).color;
     }
   }
 }
@@ -65,15 +65,18 @@ void RayTracer::Trace(int max_reflections) {
 // gamma < 1 brightens the low intensitites of the image,
 // gamma > 1 darkens the high intensities
 void RayTracer::GammaCorrect(float gamma) {
+  // precompute the intensity gamma remap
+  uint8_t lut[256];
+  for (int i = 0; i < 256; ++i) {
+    lut[i] = static_cast<uint8_t>(
+        std::pow(static_cast<float>(i) / 255.0f, gamma) * 255.0f);
+  }
   for (std::size_t row{}; row < image_.height; ++row) {
     for (std::size_t col{}; col < image_.width; ++col) {
       Vec3u8& px = image_.at(row, col);
-      px.x = static_cast<uint8_t>(std::pow(px.x / 255.0f, gamma)
-                                  * 255.0f);
-      px.y = static_cast<uint8_t>(std::pow(px.y / 255.0f, gamma)
-                                  * 255.0f);
-      px.z = static_cast<uint8_t>(std::pow(px.z / 255.0f, gamma)
-                                  * 255.0f);
+      px.x = lut[px.x];
+      px.y = lut[px.y];
+      px.z = lut[px.z];
     }
   }
 }
@@ -265,8 +268,8 @@ Vec3u8 RayTracer::EmissiveGlow(const Ray& ray, float t_max) const {
   const float t_end = std::max(0.0f, t_max);
   // add all intensitiies from non-intersecting emissive sources
   for (const auto& obj : objects_) {
-    // nullptr unless it can be downcasted to Sphere
-    const auto* s = dynamic_cast<const Sphere*>(obj.get());
+    // nullptr unless the object is a Sphere (avoids RTTI downcast)
+    const Sphere* s = obj->AsSphere();
     if (s) {
       const Material& m = s->material;
       if (m.emit_strength <= eps) continue;

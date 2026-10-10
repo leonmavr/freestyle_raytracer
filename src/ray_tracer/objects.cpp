@@ -212,20 +212,42 @@ bool Block::IsInside(const Vec3f& point) const {
 }
 
 HitRecord Block::Intersects(const Ray& ray) const {
-  std::array<Quad, 6> faces = {{
-    {vertices[0], vertices[1], vertices[2], vertices[3]}, // back
-    {vertices[4], vertices[5], vertices[6], vertices[7]}, // front
-    {vertices[0], vertices[1], vertices[5], vertices[4]}, // bottom
-    {vertices[2], vertices[3], vertices[7], vertices[6]}, // top
-    {vertices[5], vertices[1], vertices[2], vertices[6]}, // right
-    {vertices[4], vertices[7], vertices[3], vertices[0]}  // left
-  }};
-  HitRecord ret;
-  for (const auto& face : faces) {
-    const auto& hit = face.Intersects(ray);
-    if (hit.is_hit && hit.t < ret.t)
-      ret = hit;
+  /* Ray/box intersection slab method instead of checking each
+   * face individually. Explanation:
+   * https://www.cs.cornell.edu/courses/cs4620/2013fa/lectures/03raytracing1.pdf
+   */
+  const Mat3x3 rot_t = rot.Transpose();
+  const Vec3f o = rot_t * (ray.origin - center);
+  const Vec3f d = rot_t * ray.dir;
+
+  const float oa[3] = {o.x, o.y, o.z};
+  const float da[3] = {d.x, d.y, d.z};
+  const float half[3] = {half_w, half_h, half_d};
+
+  float tmin = -std::numeric_limits<float>::infinity();
+  float tmax = std::numeric_limits<float>::infinity();
+  for (int i = 0; i < 3; ++i) {
+    if (std::abs(da[i]) < eps) {
+      // ray is parallel to this slab - it can only hit if already inside
+      if (oa[i] < -half[i] || oa[i] > half[i]) return {};
+      continue;
+    }
+    const float inv_d = 1.0f / da[i];
+    float t1 = (-half[i] - oa[i]) * inv_d;
+    float t2 = (half[i] - oa[i]) * inv_d;
+    if (t1 > t2) std::swap(t1, t2);
+    tmin = std::max(tmin, t1);
+    tmax = std::min(tmax, t2);
+    if (tmin > tmax) return {};
   }
+  // nearest positive intersection with the box surface
+  const float t = tmin > 0.0f ? tmin : tmax;
+  if (t <= 0.0f) return {};
+
+  HitRecord ret;
+  ret.is_hit = true;
+  ret.t = t;
+  ret.where = ray.At(t);
   return ret;
 }
 

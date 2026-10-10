@@ -20,6 +20,8 @@ struct HitRecord {
   float t{std::numeric_limits<float>::infinity()};
 };
 
+struct Sphere; // forward declaration for the downcast helper below
+
 //---------------------------------------------------------------------
 // Base classes
 //---------------------------------------------------------------------
@@ -44,6 +46,9 @@ struct Object {
       return false;
   }
   virtual HitRecord Intersects(const Ray& ray) const = 0;
+  // cheap downcast used in hot loops instead of dynamic_cast;
+  // nullptr unless overridden by a type that is a Sphere
+  virtual const Sphere* AsSphere() const { return nullptr; }
   // base color at point `at` on the surface - override for textures
   virtual Vec3u8 SampleColor(const Vec3f& /*at*/) const {
       return material.color;
@@ -83,6 +88,7 @@ struct Sphere : Object {
   // assuming it's on the sphere
   virtual Vec3f NormalAt(const Vec3f &at) const override;
   virtual bool IsInside(const Vec3f &point) const override;
+  virtual const Sphere* AsSphere() const override { return this; }
   // optional texture for sphere using equirectangular mapping
   std::shared_ptr<Image> texture{nullptr};
   int repeat_u{1};
