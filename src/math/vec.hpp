@@ -121,7 +121,8 @@ template <typename T> struct Xyz {
   float Norm() const { return std::sqrt(NormSq()); }
 
   Xyz<float> Unit() const {
-    return Xyz<float>{x / Norm(), y / Norm(), z / Norm()};
+    const float n = Norm();
+    return Xyz<float>{x / n, y / n, z / n};
   }
 
   float Cos(const Xyz<T> &other) const {
