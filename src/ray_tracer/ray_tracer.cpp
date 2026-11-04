@@ -116,11 +116,15 @@ RayTracer::OrientationInfo RayTracer::RayOrientation(const TraceRecord& record,
   // normal; pointing away from  the refracted medium
   ret.normal = ret.entering ? record.normal : -record.normal;
   float n_obj = record.obj->material.refractive_index;
-  float n_surrounding = SurroundingIOR(record.hit_point,
-                                       record.obj,
-                                       record.normal);
-  ret.n1 = !ret.entering ? n_surrounding : ior_current;
-  ret.n2 = !ret.entering ? n_obj : ior_current;
+  // only needed when leaving the object - avoid the probe otherwise
+  float n_surrounding = ret.entering ? ior_current
+                                     : SurroundingIOR(record.hit_point,
+                                                      record.obj,
+                                                      record.normal);
+  // entering: travel from the current medium into the object
+  // leaving:  travel from the object into whatever surrounds it
+  ret.n1 = ret.entering ? ior_current : n_obj;
+  ret.n2 = ret.entering ? n_obj : n_surrounding;
   ret.eta = ret.n1 / ret.n2;
   ret.cos_i = -ret.normal.Dot(I);
   return ret;
