@@ -49,8 +49,10 @@ struct Object {
   // cheap downcast used in hot loops instead of dynamic_cast;
   // nullptr unless overridden by a type that is a Sphere
   virtual const Sphere* AsSphere() const { return nullptr; }
-  // base color at point `at` on the surface - override for textures
-  virtual Vec3u8 SampleColor(const Vec3f& /*at*/) const {
+  // base color at point `at` on the surface - override for textures;
+  // `normal` is the already-computed surface normal at `at`
+  virtual Vec3u8 SampleColor(const Vec3f& /*at*/,
+                             const Vec3f& /*normal*/) const {
       return material.color;
   }
   Vec3f center;
@@ -63,6 +65,8 @@ struct Object {
 //---------------------------------------------------------------------
 struct Triangle : Object {
   Vec3f v0, v1, v2;
+  // constant face normal, computed once in the constructor
+  Vec3f normal;
 
   Triangle() = default;
   Triangle(const Vec3f& a, const Vec3f& b, const Vec3f& c,
@@ -75,6 +79,8 @@ struct Triangle : Object {
 
 struct Quad : Object{
   Vec3f v0, v1, v2, v3;
+  // constant face normal, computed once in the constructor
+  Vec3f normal;
   Quad() = default;
   Quad(const Vec3f& a, const Vec3f& b, const Vec3f& c, const Vec3f& d,
        const Material& mat = {});
@@ -97,7 +103,8 @@ struct Sphere : Object {
   void SetTexture(const std::shared_ptr<Image>& tex,
                   int repeat_u = 1,
                   int repeat_v = 1);
-  virtual Vec3u8 SampleColor(const Vec3f& at) const override;
+  virtual Vec3u8 SampleColor(const Vec3f& at,
+                             const Vec3f& normal) const override;
   virtual HitRecord Intersects(const Ray& ray) const override;
 };
 
@@ -119,7 +126,8 @@ struct Block : Object {
   void SetTexture(const std::shared_ptr<Image>& tex,
                   int repeatx = 1,
                   int repeaty = 1);
-  virtual Vec3u8 SampleColor(const Vec3f& at) const override;
+  virtual Vec3u8 SampleColor(const Vec3f& at,
+                             const Vec3f& normal) const override;
 
   std::array<Vec3f, 8> vertices;
   Vec3f axisx, axisy, axisz;

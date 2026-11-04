@@ -35,7 +35,12 @@ Vec3u8 Lights::ColorAt(const std::vector<std::unique_ptr<Object>>& objects,
   float diffuse_intensity = 0.0;
   float specular_intensity = 0.0;
   const Vec3f& N = normal;
-  Vec3f view_dir = (camera.center() - at).Unit();
+  // view_dir is only needed for the specular term; avoid its sqrt for
+  // matte (specular == 0) objects, which are the common case
+  const bool has_specular = object.material.specular > 0;
+  const Vec3f view_dir = has_specular
+      ? (camera.center() - at).Unit()
+      : Vec3f{};
 
   for (const auto &light: lights_) {
     if (light.type == LightType::AMBIENT) {
@@ -73,16 +78,16 @@ Vec3u8 Lights::ColorAt(const std::vector<std::unique_ptr<Object>>& objects,
 
     // ref: 
     // gabrielgambetta.com/computer-graphics-from-scratch/03-light.html
-    if (object.material.specular > 0) {
+    if (has_specular) {
       Vec3f reflected = light_dir.ReflectAbout(N, true);
       float refl_dot_view = std::max(reflected.Dot(view_dir), 0.0f);
       specular_intensity += light.intensity *
                             std::pow(refl_dot_view, object.material.specular) *
                             shadow_brightness;
     }
-    float ndotl = std::max(N.Dot(light_dir), 0.0f);
-    const bool normal_facing_light = N.Dot(light_dir) > 0;
-    if (normal_facing_light) {
+    const float ndotl_raw = N.Dot(light_dir);
+    const float ndotl = std::max(ndotl_raw, 0.0f);
+    if (ndotl_raw > 0) {
       diffuse_intensity += light.intensity * ndotl * shadow_brightness;
     }
   }
@@ -92,7 +97,7 @@ Vec3u8 Lights::ColorAt(const std::vector<std::unique_ptr<Object>>& objects,
   //uint8_t r = sphere.material.color.x;
   //uint8_t g = sphere.material.color.y;
   //uint8_t b = sphere.material.color.z;
-  Vec3u8 sample = object.SampleColor(at);
+  Vec3u8 sample = object.SampleColor(at, N);
   uint8_t r = sample.x, g = sample.y, b = sample.z;
   return Vec3u8{
     static_cast<uint8_t>(std::min(r * diffuse_intensity +

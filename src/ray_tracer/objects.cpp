@@ -1,47 +1,38 @@
 #include "objects.hpp"
 
-Triangle::Triangle(const Vec3f& a, const Vec3f& b, const Vec3f& c,
-                   const Material& mat) : v0(a), v1(b), v2(c) {
-  center = (v0 + v1 + v2) / 3.0f;
-  material = mat;
-  bounds.Expand(v0);
-  bounds.Expand(v1);
-  bounds.Expand(v2);
-  bounds.Inflate(eps);
-}
+namespace {
 
-Vec3f Triangle::NormalAt(const Vec3f& /*at*/) const {
-  // constant normal across the surface
-  return (v1 - v0).Cross(v2 - v0).Unit();
-}
-
-HitRecord Triangle::Intersects(const Ray& ray) const {
-  // Moller-Trumbore ray-triangle intersection algorithm
-  // notation: TODO link my tutorial
-  // ref: web.engr.oregonstate.edu/~mjb/vulkan/Handouts/RayTriangleIntersection.1pp.pdf
+// Moller-Trumbore ray-triangle intersection against raw vertices.
+// Shared by Triangle and Quad (which is two triangles) so no Triangle
+// temporaries are constructed in the hot path.
+// ref: web.engr.oregonstate.edu/~mjb/vulkan/Handouts/RayTriangleIntersection.1pp.pdf
+HitRecord RayTriangleIntersect(const Ray& ray,
+                               const Vec3f& v0,
+                               const Vec3f& v1,
+                               const Vec3f& v2) {
   Vec3f edge1 = v1 - v0;
   Vec3f edge2 = v2 - v0;
   // solve the system [edge1 | edge2 | -ray.dir]^T[u | v | t] = 
-  //                  [ray.origin | -V0] 
+  //                  [ray.origin | -v0] 
   // using Cramer's method and the properties of mixed product
   Vec3f h = ray.dir.Cross(edge2);
-  float a = edge1.Dot(h);
-  if (std::abs(a) < eps)
+  float det = edge1.Dot(h);
+  if (std::abs(det) < eps)
     return {}; // ray is parallel to triangle
 
-  float ainv = 1/a;
+  float det_inv = 1.0f / det;
   Vec3f s = ray.origin - v0;
-  // barycetric coordinate 0..1 of a point along edge 1
-  float u = ainv * s.Dot(h);
+  // barycentric coordinate 0..1 of a point along edge 1
+  float u = det_inv * s.Dot(h);
   if (u < 0 || u > 1)
     return {};
 
   Vec3f q = s.Cross(edge1);
-  // barycetric coordinate 0..1 of a point along edge 2
-  float v = ainv * ray.dir.Dot(q);
+  // barycentric coordinate 0..1 of a point along edge 2
+  float v = det_inv * ray.dir.Dot(q);
   if (v < 0 || u + v > 1)
     return {};
-  float t = ainv * edge2.Dot(q);
+  float t = det_inv * edge2.Dot(q);
   if (t > 0) { // ray intersection
     return {ray.At(t), true, t};
   } else { // intersection lies behind the ray's origin 
@@ -49,10 +40,33 @@ HitRecord Triangle::Intersects(const Ray& ray) const {
   }
 }
 
+} // namespace
+
+Triangle::Triangle(const Vec3f& a, const Vec3f& b, const Vec3f& c,
+                   const Material& mat) : v0(a), v1(b), v2(c) {
+  center = (v0 + v1 + v2) / 3.0f;
+  material = mat;
+  normal = (v1 - v0).Cross(v2 - v0).Unit();
+  bounds.Expand(v0);
+  bounds.Expand(v1);
+  bounds.Expand(v2);
+  bounds.Inflate(eps);
+}
+
+Vec3f Triangle::NormalAt(const Vec3f& /*at*/) const {
+  // constant normal across the surface, precomputed in the constructor
+  return normal;
+}
+
+HitRecord Triangle::Intersects(const Ray& ray) const {
+  return RayTriangleIntersect(ray, v0, v1, v2);
+}
+
 Quad::Quad(const Vec3f& a, const Vec3f& b, const Vec3f& c, const Vec3f& d,
            const Material& mat) : v0(a), v1(b), v2(c), v3(d) {
   center = (v0 + v1 + v2 + v3) / 4.0f;
   material = mat;
+  normal = (v1 - v0).Cross(v2 - v0).Unit();
   bounds.Expand(v0);
   bounds.Expand(v1);
   bounds.Expand(v2);
@@ -61,24 +75,16 @@ Quad::Quad(const Vec3f& a, const Vec3f& b, const Vec3f& c, const Vec3f& d,
 }
 
 Vec3f Quad::NormalAt(const Vec3f& /*at*/) const {
-  return (v1 - v0).Cross(v2 - v0).Unit();
+  // constant normal across the surface, precomputed in the constructor
+  return normal;
 }
 
 HitRecord Quad::Intersects(const Ray& ray) const {
-  std::array<HitRecord, 2> hits;
-  Triangle t1{v0, v1, v2};
-  Triangle t2{v0, v2, v3};
-
-  HitRecord h0 = t1.Intersects(ray);
-  HitRecord h1 = t2.Intersects(ray);
-  HitRecord result;
+  HitRecord h0 = RayTriangleIntersect(ray, v0, v1, v2);
+  HitRecord h1 = RayTriangleIntersect(ray, v0, v2, v3);
   if (h0.is_hit && h1.is_hit)
-    result = (h0.t < h1.t ? h0 : h1);
-  else if (h0.is_hit) 
-    result = h0;
-  else if (h1.is_hit) 
-    result = h1;
-  return result;
+    return (h0.t < h1.t ? h0 : h1);
+  return h0.is_hit ? h0 : h1;
 }
 
 Sphere::Sphere(const Vec3f& c, float r, const Material& mat) {
@@ -107,11 +113,11 @@ void Sphere::SetTexture(const std::shared_ptr<Image>& tex,
   this->repeat_v = std::max(1, repeat_v);
 }
 
-Vec3u8 Sphere::SampleColor(const Vec3f& at) const {
+Vec3u8 Sphere::SampleColor(const Vec3f& /*at*/, const Vec3f& normal) const {
   if (!texture)
     return material.color;
-  // compute normal in object space (sphere centered at center)
-  Vec3f N = (at - center).Unit();
+  // `normal` is the surface normal already computed at the hit point
+  const Vec3f& N = normal;
   // spherical angles - latitude (theta) and longitude (phi)
   float theta = std::atan2(N.z, N.x); // [-pi, pi]
   float phi = std::acos(N.y);         // [0, pi] assuming N normalized
@@ -192,29 +198,25 @@ Block::Block(Vec3f center, float half_x, float half_y, float half_z,
 }
 
 Vec3f Block::NormalAt(const Vec3f& at) const {
-  // align with origin and unrotate 
+  // align with origin and unrotate
   Vec3f local = rot_t * (at - center);
   // determine the face: find axis with maximum normalized absolute distance
   float ax = std::abs(local.x) / half_w;
   float ay = std::abs(local.y) / half_h;
   float az = std::abs(local.z) / half_d;
 
-  Vec3f normal_local;
+  // face normals are the precomputed, unit-length world-space axes;
+  // `rot` is a pure rotation so `rot * unit_axis` is already unit
   if (ax >= ay && ax >= az) {
       // closest to +-x face
-      float x = (local.x >= 0.f) ? 1.f : -1.f;
-      normal_local = Vec3f{x, 0.f, 0.f};
+      return (local.x >= 0.f) ? axisx : -axisx;
   } else if (ay >= ax && ay >= az) {
       // closest to +-y face
-      float y = (local.y >= 0.f) ? 1.f : -1.f;
-      normal_local = Vec3f{0.f, y, 0.f};
+      return (local.y >= 0.f) ? axisy : -axisy;
   } else {
       // closest to +-z face
-      float z = (local.z >= 0.f) ? 1.f : -1.f;
-      normal_local = Vec3f{0.f, 0.f, z};
+      return (local.z >= 0.f) ? axisz : -axisz;
   }
-  // transform back into world coords 
-  return (rot * normal_local).Unit();
 }
 
 bool Block::IsInside(const Vec3f& point) const {
@@ -274,7 +276,7 @@ void Block::SetTexture(const std::shared_ptr<Image>& tex,
   this->repeaty = std::max(1, repeaty);
 }
 
-Vec3u8 Block::SampleColor(const Vec3f& at) const {
+Vec3u8 Block::SampleColor(const Vec3f& at, const Vec3f& /*normal*/) const {
   if (!texture)
     return material.color;
   // at the origin and unrotated 
