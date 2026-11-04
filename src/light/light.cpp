@@ -30,10 +30,11 @@ void Lights::Normalize() {
 Vec3u8 Lights::ColorAt(const std::vector<std::unique_ptr<Object>>& objects,
                        const Object &object,
                        const Vec3f &at,
-                       const Camera &camera) const {
+                       const Camera &camera,
+                       const Vec3f &normal) const {
   float diffuse_intensity = 0.0;
   float specular_intensity = 0.0;
-  Vec3f N = object.NormalAt(at);
+  const Vec3f& N = normal;
   Vec3f view_dir = (camera.center() - at).Unit();
 
   for (const auto &light: lights_) {
@@ -73,7 +74,7 @@ Vec3u8 Lights::ColorAt(const std::vector<std::unique_ptr<Object>>& objects,
     // ref: 
     // gabrielgambetta.com/computer-graphics-from-scratch/03-light.html
     if (object.material.specular > 0) {
-      Vec3f reflected = light_dir.ReflectAbout(N).Unit();
+      Vec3f reflected = light_dir.ReflectAbout(N, true);
       float refl_dot_view = std::max(reflected.Dot(view_dir), 0.0f);
       specular_intensity += light.intensity *
                             std::pow(refl_dot_view, object.material.specular) *
@@ -108,9 +109,9 @@ float Lights::ShadowFactor(const Light& light,
                            const Object& object,
                            const Vec3f& at,
                            const Vec3f& normal) {
-  // shift up the origin a bit to avoid self-intersection
-  // (shadow acne) and multiply by eps * n to kill speckles          
-  Vec3f origin = at + (normal - at) * eps * 4.0f; 
+  // origin is pushed off the surface per light type (below) to avoid
+  // self-intersection, i.e. shadow acne
+  Vec3f origin;
   constexpr float bright_min = 0.0, bright_max = 1.0;
   float ret = bright_max; // no shadow
   /*
@@ -143,6 +144,7 @@ float Lights::ShadowFactor(const Light& light,
     for (const auto &obj : objects) {
       // skip self-intersection
       if (obj.get() == &object) continue;
+      if (!IntersectsAABB(shadow_ray, obj->bounds)) continue;
       HitRecord hit = obj->Intersects(shadow_ray);
       // check if object blocks the light (0 < t < light_distance)
       // i.e. object is between surface and the point source
@@ -160,7 +162,9 @@ float Lights::ShadowFactor(const Light& light,
     // Use (1) the distance to source 
     // and (2) the relative direction between the normal and the
     // direction to source to compute a brightness factor within [0,1]
-    dir_to_light = (*light.data - origin).Unit();
+    // dir_to_light is exactly the shadow ray's (normalized) direction,
+    // so reuse it instead of normalizing again
+    dir_to_light = shadow_ray.dir;
     // how perpendicular the ray is to the normal (2)
     float ndotl = normal.Dot(dir_to_light);
     // normalized distance from target to source
@@ -178,6 +182,7 @@ float Lights::ShadowFactor(const Light& light,
     bool any_hit = std::any_of(objects.begin(), objects.end(),
                    [&](const auto& obj) {
                      if (obj.get() == &object) return false;
+                     if (!IntersectsAABB(shadow_ray, obj->bounds)) return false;
                      auto hit = obj->Intersects(shadow_ray);
                      if (!hit.is_hit || hit.t <= 0) return false;
                      // normal of the other object at intersection

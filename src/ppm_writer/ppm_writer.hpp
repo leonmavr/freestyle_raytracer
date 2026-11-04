@@ -11,24 +11,45 @@
 
 namespace Ppm {
 
+// append an unsigned integer in decimal without ostream overhead
+static void AppendUInt(std::string &dst, unsigned v) {
+  char tmp[10];
+  int n = 0;
+  do {
+    tmp[n++] = static_cast<char>('0' + v % 10u);
+    v /= 10u;
+  } while (v);
+  while (n) dst.push_back(tmp[--n]);
+}
+
 static void Write(const Image &mat,
                    const std::string &filename = "output.ppm") {
   std::ofstream file(filename);
   if (!file)
     throw std::runtime_error("ERROR: Could not write to file " + filename);
 
-  file << "P3\n";
-  file << mat.width << " " << mat.height << "\n";
-  file << 255 /* max intensity for uint8 */ << "\n";
+  // build the whole file in memory and write it once; formatting
+  // millions of channels through operator<< is comparatively slow
+  std::string buf;
+  buf.reserve(static_cast<std::size_t>(mat.width) * mat.height * 12 + 32);
+  buf += "P3\n";
+  AppendUInt(buf, mat.width);
+  buf += ' ';
+  AppendUInt(buf, mat.height);
+  buf += "\n255\n";
   for (unsigned y = 0; y < mat.height; ++y) {
     for (unsigned x = 0; x < mat.width; ++x) {
       auto pixel = mat.at(y, x);
-      file << static_cast<int>(pixel.x) << " " <<
-              static_cast<int>(pixel.y) << " " <<
-              static_cast<int>(pixel.z) << " ";
+      AppendUInt(buf, pixel.x);
+      buf += ' ';
+      AppendUInt(buf, pixel.y);
+      buf += ' ';
+      AppendUInt(buf, pixel.z);
+      buf += ' ';
     }
-    file << "\n";
+    buf += '\n';
   }
+  file.write(buf.data(), static_cast<std::streamsize>(buf.size()));
   std::cout << "=== Image saved as " + filename + " ===" << std::endl;
 }
 

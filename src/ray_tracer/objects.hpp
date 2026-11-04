@@ -55,6 +55,7 @@ struct Object {
   }
   Vec3f center;
   Material material;
+  AABB bounds;
 };
 
 //---------------------------------------------------------------------
@@ -124,6 +125,9 @@ struct Block : Object {
   Vec3f axisx, axisy, axisz;
   float half_w, half_h, half_d;
   Mat3x3 rot;
+  // cached transpose of `rot` (its inverse for a pure rotation), reused
+  // by every hit/normal/inside test instead of recomputing it each call
+  Mat3x3 rot_t;
 };
 
 #endif // OBJECTS_HPP_

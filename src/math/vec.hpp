@@ -137,9 +137,15 @@ template <typename T> struct Xyz {
                   x * other.y - y * other.x);
   }
 
-  Xyz<T> ReflectAbout(const Xyz<T> &axis) const {
-    // reflect the vector about the given axis (treated as normal)
-    const auto n = axis.Unit();
+  Xyz<T> ReflectAbout(const Xyz<T> &axis, bool is_unit = false) const {
+    // reflect the vector about the given axis (treated as normal);
+    // when is_unit is true the axis is already unit length and the
+    // normalization sqrt is skipped
+    const Xyz<float> n = is_unit
+        ? Xyz<float>(static_cast<float>(axis.x),
+                     static_cast<float>(axis.y),
+                     static_cast<float>(axis.z))
+        : axis.Unit();
     double v = Dot(n);
     return Xyz<T>{
       static_cast<T>(x - 2 * v * n.x),

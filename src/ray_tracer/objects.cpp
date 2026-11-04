@@ -4,6 +4,10 @@ Triangle::Triangle(const Vec3f& a, const Vec3f& b, const Vec3f& c,
                    const Material& mat) : v0(a), v1(b), v2(c) {
   center = (v0 + v1 + v2) / 3.0f;
   material = mat;
+  bounds.Expand(v0);
+  bounds.Expand(v1);
+  bounds.Expand(v2);
+  bounds.Inflate(eps);
 }
 
 Vec3f Triangle::NormalAt(const Vec3f& /*at*/) const {
@@ -49,6 +53,11 @@ Quad::Quad(const Vec3f& a, const Vec3f& b, const Vec3f& c, const Vec3f& d,
            const Material& mat) : v0(a), v1(b), v2(c), v3(d) {
   center = (v0 + v1 + v2 + v3) / 4.0f;
   material = mat;
+  bounds.Expand(v0);
+  bounds.Expand(v1);
+  bounds.Expand(v2);
+  bounds.Expand(v3);
+  bounds.Inflate(eps);
 }
 
 Vec3f Quad::NormalAt(const Vec3f& /*at*/) const {
@@ -76,6 +85,9 @@ Sphere::Sphere(const Vec3f& c, float r, const Material& mat) {
   center = c;
   radius = r;
   material = mat;
+  bounds.min = Vec3f{c.x - r, c.y - r, c.z - r};
+  bounds.max = Vec3f{c.x + r, c.y + r, c.z + r};
+  bounds.Inflate(eps);
 }
 
 // assuming it's on the sphere
@@ -130,23 +142,23 @@ HitRecord Sphere::Intersects(const Ray& ray) const {
   float c = L.Dot(L) - r * r;
 
   float discriminant = b*b - 4*a*c;
-  ret.is_hit = discriminant > 0;
-  if (!ret.is_hit)
-    return ret;
+  if (discriminant <= 0)
+    return ret; // no real intersection
 
   float sqrt_disc = std::sqrt(discriminant);
   float t1 = (-b - sqrt_disc) / (2 * a);
   float t2 = (-b + sqrt_disc) / (2 * a);
 
-  // nearest positive intersection - both must be in front of the ray
-  ret.is_hit |= (t1 > 0) || (t2 > 0);
-  if (!ret.is_hit)
-    return ret;
-  float tmin = std::numeric_limits<float>::infinity();
-  ret.t = (t1 > 0 && t2 > 0) ? std::min(t1, t2) :
-          (t1 > 0 ? t1 :
-          (t2 > 0 ? t2 : tmin));
-  ret.where = ray.At(ret.t);
+  // nearest intersection in front of the ray origin; one of t1/t2 is
+  // > 0 here (otherwise the sphere lies entirely behind the ray)
+  float t = (t1 > 0 && t2 > 0) ? std::min(t1, t2) :
+            (t1 > 0 ? t1 : t2);
+  if (t <= 0)
+    return ret; // sphere entirely behind the ray origin
+
+  ret.is_hit = true;
+  ret.t = t;
+  ret.where = ray.At(t);
   return ret;
 }
 
@@ -159,7 +171,8 @@ Block::Block(Vec3f center, float half_x, float half_y, float half_z,
              const Material& mat) : half_w(half_x),
                                     half_h(half_y),
                                     half_d(half_z),
-                                    rot(mrot) {
+                                    rot(mrot),
+                                    rot_t(mrot.Transpose()) {
   this->center = center;
   // CCW normalized vertices
   const int v[8][3] = {
@@ -169,7 +182,9 @@ Block::Block(Vec3f center, float half_x, float half_y, float half_z,
   for (std::size_t i{}; i < 8; ++i) {
     Vec3f vscaled(v[i][0] * half_x, v[i][1] * half_y, v[i][2] * half_z);
     vertices[i] = center + rot * vscaled;
+    bounds.Expand(vertices[i]);
   }
+  bounds.Inflate(eps);
   axisx = (rot * Vec3f{1,0,0}).Unit();
   axisy = (rot * Vec3f{0,1,0}).Unit();
   axisz = (rot * Vec3f{0,0,1}).Unit();
@@ -178,7 +193,7 @@ Block::Block(Vec3f center, float half_x, float half_y, float half_z,
 
 Vec3f Block::NormalAt(const Vec3f& at) const {
   // align with origin and unrotate 
-  Vec3f local = rot.Transpose() * (at - center);
+  Vec3f local = rot_t * (at - center);
   // determine the face: find axis with maximum normalized absolute distance
   float ax = std::abs(local.x) / half_w;
   float ay = std::abs(local.y) / half_h;
@@ -204,7 +219,7 @@ Vec3f Block::NormalAt(const Vec3f& at) const {
 
 bool Block::IsInside(const Vec3f& point) const {
   // convert to block-local coordinates
-  Vec3f local = rot.Transpose() * (point - center);
+  Vec3f local = rot_t * (point - center);
 
   return (std::abs(local.x) <= half_w + eps) &&
          (std::abs(local.y) <= half_h + eps) &&
@@ -216,7 +231,7 @@ HitRecord Block::Intersects(const Ray& ray) const {
    * face individually. Explanation:
    * https://www.cs.cornell.edu/courses/cs4620/2013fa/lectures/03raytracing1.pdf
    */
-  const Mat3x3 rot_t = rot.Transpose();
+  const Mat3x3& rot_t = this->rot_t;
   const Vec3f o = rot_t * (ray.origin - center);
   const Vec3f d = rot_t * ray.dir;
 
@@ -263,7 +278,7 @@ Vec3u8 Block::SampleColor(const Vec3f& at) const {
   if (!texture)
     return material.color;
   // at the origin and unrotated 
-  Vec3f local = rot.Transpose() * (at - center);
+  Vec3f local = rot_t * (at - center);
   // find dominant orientation (axis) to identify face
   // the maximum of these distances corresponds to face that was hit
   float ax = std::abs(local.x) / half_w;

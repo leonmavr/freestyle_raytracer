@@ -29,6 +29,13 @@ const Image& RayTracer::image() { return image_; }
 
 void RayTracer::Trace(int max_reflections) {
   lights_.Normalize();
+  // cache emissive emitters once; the glow pass no longer scans all
+  // objects on every ray
+  emissive_.clear();
+  for (const auto& obj : objects_) {
+    const Sphere* s = obj->AsSphere();
+    if (s && s->material.emit_strength > eps) emissive_.push_back(s);
+  }
   // current camera plane corners (world-space)
   auto corners = camera_.CornersWorld();
   // local camera axes in world space for rasterization
@@ -93,6 +100,7 @@ float RayTracer::SurroundingIOR(const Vec3f& where,
   float ret = 1.0f; // default is air
   for (const auto& other : objects_) {
     if (other.get() == self) continue;
+    if (!PointInAABB(other->bounds, probe)) continue;
     if (other->IsInside(probe)) {
       ret = other->material.refractive_index;
     }
@@ -140,6 +148,7 @@ TraceRecord RayTracer::TraceRay(const Ray& ray, int depth, float ior_current) co
   TraceRecord ret;
   // find nearest intersection
   for (const auto& obj : objects_) {
+    if (!IntersectsAABB(ray, obj->bounds)) continue;
     auto hit = obj->Intersects(ray);
     // reject hits that are behind the ray's origin
     if (!hit.is_hit || hit.t <= 0) continue;
@@ -169,7 +178,7 @@ TraceRecord RayTracer::TraceRay(const Ray& ray, int depth, float ior_current) co
                               0.0f, 1.0f);
   // direct lighting (surface shading) from diffuse and specular light
   Vec3u8 direct = lights_.ColorAt(objects_, *ret.obj, ret.hit_point,
-                                  camera_);
+                                  camera_, ret.normal);
   // transparency reduces the brightness
   direct *= (1.0f - mat_trans);
 
@@ -189,7 +198,7 @@ TraceRecord RayTracer::TraceRay(const Ray& ray, int depth, float ior_current) co
   // reflection
   //------------------------------------------------------------------
   Ray ray_refl{{}, {}};
-  ray_refl.dir = inc.ReflectAbout(ori.normal);
+  ray_refl.dir = inc.ReflectAbout(ori.normal, true);
   // offset slightly along the normal to avoid self-intersection
   ray_refl.origin = ret.hit_point + ori.normal * eps * eps_factor;
   // -----> child ray (1): reflection
@@ -267,10 +276,10 @@ Vec3u8 RayTracer::EmissiveGlow(const Ray& ray, float t_max) const {
   const Vec3f& D = ray.dir;
   const float t_end = std::max(0.0f, t_max);
   // add all intensitiies from non-intersecting emissive sources
-  for (const auto& obj : objects_) {
-    // nullptr unless the object is a Sphere (avoids RTTI downcast)
-    const Sphere* s = obj->AsSphere();
-    if (s) {
+  // (the emitter list is cached in Trace(), so this is a no-op when
+  //  the scene has no emissive objects)
+  for (const Sphere* s : emissive_) {
+    {
       const Material& m = s->material;
       if (m.emit_strength <= eps) continue;
       // closest point on the ray segment [0, t_end]

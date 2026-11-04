@@ -30,11 +30,13 @@ public:
   void AddDir(float intensity, float dirx, float diry, float dirz);
   // call it having added all lights to normalize their intensities
   void Normalize();
-  // diffuse and specular light contribution at a point on an object
+  // diffuse and specular light contribution at a point on an object;
+  // `normal` is the surface normal already computed at `at`
   Vec3u8 ColorAt(const std::vector<std::unique_ptr<Object>>& objects,
                  const Object &object,
                  const Vec3f &at,
-                 const Camera &camera) const;
+                 const Camera &camera,
+                 const Vec3f &normal) const;
 
 private:
   std::vector<Light> lights_;

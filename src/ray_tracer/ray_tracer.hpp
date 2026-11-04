@@ -113,6 +113,8 @@ private:
   Vec3f cam_right_{};
   Vec3f cam_up_{};
   Vec3f cam_forward_{};
+  // emissive spheres, cached at the start of Trace() for the glow pass
+  std::vector<const Sphere*> emissive_{};
   // spherical background
   Image background_{};
   bool has_background_{false};
