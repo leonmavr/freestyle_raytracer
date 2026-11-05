@@ -55,7 +55,10 @@ void RayTracer::Trace(int max_reflections) {
   std::size_t w = camera_.width();
   std::size_t h = camera_.height();
   // row-major order keeps writes to the image buffer sequential
-  for (std::size_t row{}; row < h; ++row) {
+  // dynamic = on demand are rows may take different time each
+  // 1 = chunk size (one row at a time)
+#pragma omp parallel for schedule(dynamic, 1)
+  for (std::size_t row = 0; row < h; ++row) {
     float v = static_cast<float>(row) / static_cast<float>(h - 1);
     for (std::size_t col{}; col < w; ++col) {
       // normalized column coordinate

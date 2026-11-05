@@ -30,7 +30,8 @@ INCLUDES := $(patsubst %,-I%,$(INCDIRS))
 DEFINES ?=
 
 CXXFLAGS := $(INCLUDES) -O3 -std=c++17 -Wall -Wextra -MMD -MP\
-            $(DEFINES) -Wno-unused-parameter -Wno-unused-function
+            $(DEFINES) -Wno-unused-parameter -Wno-unused-function\
+			-Wno-unused-parameter -Wno-unused-function -fopenmp
 LDFLAGS  :=
 LDLIBS   :=
 
