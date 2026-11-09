@@ -48,12 +48,6 @@ Vec3u8 Lights::ColorAt(const std::vector<std::unique_ptr<Object>>& objects,
       continue; // ambient light isn't affected by shadows
     }
 
-    // check for shadows before computing diffuse/specular component
-    float shadow_brightness = ShadowFactor(light, objects,
-                   object, at, N);
-    if (shadow_brightness < eps)
-      continue; // fully occluded - save computation time
-
     /*
      * D ___\___              D: directional source     
      *      \___\___          P: point source
@@ -75,21 +69,30 @@ Vec3u8 Lights::ColorAt(const std::vector<std::unique_ptr<Object>>& objects,
     Vec3f light_dir = (light.type == LightType::POINT) 
                       ? (*light.data - at).Unit()
                       : *light.data;
+    const float ndotl = N.Dot(light_dir);
+    // light behind the surface: no diffuse or specular contribution, so
+    // skip the (expensive) shadow test too
+    if (ndotl <= 0)
+      continue;
+
+    // check for shadows before computing diffuse/specular component
+    float shadow_brightness = ShadowFactor(light, objects,
+                   object, at, N);
+    if (shadow_brightness < eps)
+      continue; // fully occluded - save computation time
 
     // ref: 
     // gabrielgambetta.com/computer-graphics-from-scratch/03-light.html
     if (has_specular) {
-      Vec3f reflected = light_dir.ReflectAbout(N, true);
+      // mirror the direction to the light about the normal; negate first as
+      // ReflectAbout expects a vector pointing towards the surface
+      Vec3f reflected = (-light_dir).ReflectAbout(N, true);
       float refl_dot_view = std::max(reflected.Dot(view_dir), 0.0f);
       specular_intensity += light.intensity *
                             std::pow(refl_dot_view, object.material.specular) *
                             shadow_brightness;
     }
-    const float ndotl_raw = N.Dot(light_dir);
-    const float ndotl = std::max(ndotl_raw, 0.0f);
-    if (ndotl_raw > 0) {
-      diffuse_intensity += light.intensity * ndotl * shadow_brightness;
-    }
+    diffuse_intensity += light.intensity * ndotl * shadow_brightness;
   }
 
   diffuse_intensity = std::min(diffuse_intensity, 1.0f);

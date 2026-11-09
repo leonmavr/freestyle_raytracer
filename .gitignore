@@ -31,5 +31,9 @@
 *.out
 *.app
 
+# nvim includes
+compile_commands.json
+
 # Directories
 build
+*.cache*
